@@ -132,17 +132,17 @@ def draw_random_triangle(img_size, thickness_range):
 
 
 def draw_random_figure(img_size, thickness_range):
-    fig = np.random.randint(0, 4)
-    if fig == 0:
-        return fig,draw_random_circle(img_size, (10, img_size//5), thickness_range)
-    elif fig == 1:
-        return fig,draw_random_rectangle(img_size, thickness_range)
-    elif fig == 2:
-        return fig,draw_random_elipse(img_size, thickness_range)
-    elif fig == 3:
-        return fig,draw_random_line(img_size, thickness_range)
-    elif fig == 4:
-        return fig,draw_random_triangle(img_size, thickness_range)
+    cls = np.random.randint(0, 4)
+    if cls == 0:
+        return cls,draw_random_circle(img_size, (10, img_size//5), thickness_range)
+    elif cls == 1:
+        return cls,draw_random_rectangle(img_size, thickness_range)
+    elif cls == 2:
+        return cls,draw_random_elipse(img_size, thickness_range)
+    elif cls == 3:
+        return cls,draw_random_line(img_size, thickness_range)
+    elif cls == 4:
+        return cls,draw_random_triangle(img_size, thickness_range)
 
 
 # # import matplotlib.pyplot as plt
