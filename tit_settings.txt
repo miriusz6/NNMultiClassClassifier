@@ -1,0 +1,60 @@
+Figures 5 classes:
+
+ID: 0
+5 runs
+Validation loss 0.2651 | Validation accuracy 0.9062
+Embedder:  51756
+Root:  51620
+Tree:  196955
+Root-Tree-Total:  248575
+Total:  300331
+model = tit(img_size = 128,
+            channels = 3,
+            patch_size = 16,
+            classes = 5,
+            embed_dim = 60,
+            patch_pipe_root_forks = [2], # must be >1 forks patch_pipe
+            patch_pipe_root_depth = 10,
+            patch_pipe_root_out_dim = 40,
+            patch_pipe_tree_merges = [2], # must be patch_pipe_blocks % necks_input_pipes == 0,
+            patch_pipe_tree_depth = 6,
+            patch_pipe_tree_out_dim = 20,)
+
+ID: 1
+5 runs:
+Validation loss 0.1146 | Validation accuracy 0.9625
+Embedder:  51756
+Root:  61800
+Tree:  213868
+Root-Tree-Total:  275668
+Total:  327424
+model_config = {
+    "id" : 1,
+    "patch_size" : 16,
+    "embed_dim" : 60,
+    "patch_pipe_root_forks" : [2,2], 
+    "patch_pipe_root_depth" : 10,
+    "patch_pipe_root_out_dim" : 30,
+    "patch_pipe_tree_merges" : [2,2], 
+    "patch_pipe_tree_depth" : 6,
+    "patch_pipe_tree_out_dim" : 10,
+}
+
+
+ID: 2
+Validation loss 0.576 | Validation accuracy 0.7764
+Embedder:  26646
+Root:  5430
+Tree:  25675
+Total:  31105
+model = tit(img_size = 128,
+    channels = 3,
+    patch_size = 16,
+    classes = 5,
+    embed_dim = 30,
+    patch_pipe_root_forks = [2], # must be >1 forks patch_pipe
+    patch_pipe_root_depth = 5,
+    patch_pipe_root_out_dim = 15,
+    patch_pipe_tree_merges = [2], # must be patch_pipe_blocks % necks_input_pipes == 0,
+    patch_pipe_tree_depth = 4,
+    patch_pipe_tree_out_dim = 5,)
