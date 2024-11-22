@@ -159,17 +159,11 @@ class SimpleModel(nn.Module):
 
 
     def forward(self, x):
-        #x = self.batch_norm(x)
+        x = self.batch_norm(x)
         ps = self.patch_embed.patch_embed.weight.data
-        # for col in range(self.cols):
-        #     a = ps[:,col]
-        #     b = self.nope(a)
-        #     ps[:,col] = self.nope(b)
 
-        a = ps.permute(1,0)
-        b = self.nope(a)
-        #self.patch_embed.patch_embed.weight.data = b.permute(1,0)
-        x = self.patch_embed(x)
+
+        #x = self.patch_embed(x)
         x = self.lin1(x)
         x = self.lin2(x)
         x = self.lin3(x)
