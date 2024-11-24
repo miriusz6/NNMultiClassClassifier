@@ -20,13 +20,13 @@ class FiguresData(Dataset):
         # random rotation, nooise, flip, etc
         self.transform = v2.Compose([
             # affine
-            v2.RandomAffine(0, translate=(0.3, 0.3)),
-            v2.RandomAffine(0, scale=(0.8, 1.2)),
-            v2.RandomAffine(0, shear=(-10, 10)),
+            # v2.RandomAffine(0, translate=(0.3, 0.3)),
+            # v2.RandomAffine(0, scale=(0.8, 1.2)),
+            # v2.RandomAffine(0, shear=(-10, 10)),
             # color
             #v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-            v2.GaussianNoise(0.2),
-            v2.GaussianBlur(3, (0.2, 1)),
+            v2.GaussianNoise(0.1),
+            v2.GaussianBlur(3, (0.1, 1)),
             # flip and rotation
             v2.RandomHorizontalFlip(),
             v2.RandomVerticalFlip(),
