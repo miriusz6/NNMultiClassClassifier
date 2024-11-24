@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from math import prod
+from math import prod, sqrt
 
 # # #OrderedDict 
 from collections import OrderedDict
@@ -62,37 +62,6 @@ class PatchEmbedder(nn.Module):
         out += self.pos_embed.to(x.device)
         return out
 
-    
-
-
-# class SimpleTrainer(nn.Module):
-#     def __init__(self, device = 'cuda'):
-#         super().__init__()
-#         self.layer = layer
-
-#         self.cols = layer[1]
-#         self.rows = layer_dims[0]
-
-#         self.l = nn.Sequential(
-#             nn.Linear(self.rows, self.rows*2, device=device),
-#             nn.ReLU(),
-#             nn.Linear(self.rows*2, self.rows*4, device=device),
-#             nn.ReLU(),
-#             nn.Linear(self.rows*4, self.rows*2, device=device),
-#             nn.ReLU(),
-#             nn.Linear(self.rows*2, self.rows, device=device),
-#         )
-
-        
-
-#         self.device = device
-
-#     def forward(self, x):
-#         out = torch.zeros(self.rows, self.cols, device=self.device)
-#         for col in range(self.cols):
-#             out[:,col] = self.l(x[:,col])
-#         return out
-        
 
 
 class SimpleModel(nn.Module):
@@ -116,6 +85,8 @@ class SimpleModel(nn.Module):
         self.embed_dim = embed_dim
 
         self.patches_pr_img = ((img_size//patch_size)**2)+1
+
+        self.cross_corr_cnt = 2
         
         
         embed_config = {
@@ -129,74 +100,88 @@ class SimpleModel(nn.Module):
         }
 
         self.batch_norm = nn.BatchNorm2d(channels, device=device)
-
+        # for 16x16 and 100 is 77k
+        # patch_size x patch_size x channels x embed_dim
         self.patch_embed = PatchEmbedder(embed_config)
 
-        self.lin1 = nn.Linear(embed_dim, 100, device=device)
-        self.lin2 = nn.Linear(100, 60, device=device)
-        self.lin3 = nn.Linear(60, 10, device=device)
-        self.combine = nn.Linear(self.patches_pr_img*10, self.patches_pr_img*5, device=device)
-        self.head = nn.Linear(self.patches_pr_img*5, classes, device=device)
+        correl_size = embed_dim # (self.embed_dim//self.patches_pr_img) *2
 
+        # 20k
+        self.correlation = nn.Linear(self.embed_dim*2, correl_size, device=device)
+
+        self.cross_correlation = nn.Linear(correl_size*2, correl_size, device=device)
+
+        # 20k
+        self.apply_correlation = nn.Linear(self.embed_dim*2, self.embed_dim, device=device)
         
-        self.grad_false()
 
-        ps = self.patch_embed.patch_embed.weight.data
-        self.cols = ps.shape[1]
-        self.rows = ps.shape[0]
-        self.nope = nn.Sequential(
-            nn.Linear(self.rows, self.rows*2, device=device),
-            nn.ReLU(),
-            nn.Linear(self.rows*2, self.rows*4, device=device),
-            nn.ReLU(),
-            nn.Linear(self.rows*4, self.rows*2, device=device),
-            nn.ReLU(),
-            nn.Linear(self.rows*2, self.rows, device=device),
-        )
+    def cartesian_prod_last_dim(self, x):
+        batch = x.shape[0]
+        patches = x.shape[1]
+        embed = x.shape[2]
+        
+        # B x P x E -> B x P x 1 x E
+        y = x.unsqueeze(2)
+        # B x P x 1 x E -> B x P x P x E
+        y = y.expand(batch,patches,patches,embed)
+        # B x P x P x E -> B x (P x P) x E
+        y  = y.reshape(batch,patches*patches,embed)
 
-        self.set_to_ones()
-
-
-
-    def forward(self, x):
-        x = self.batch_norm(x)
-        ps = self.patch_embed.patch_embed.weight.data
-
-
-        #x = self.patch_embed(x)
-        x = self.lin1(x)
-        x = self.lin2(x)
-        x = self.lin3(x)
-        x = self.combine(x.flatten(1))
-        x = self.head(x)
-
+        # B x (P x P) x E -> B x (P x P) x E
+        # but the last dim is no longer the same 
+        # (one repeated) embedding
+        z = rearrange(y, 'b (ps pss) e -> b (pss ps) e',
+                            ps = patches, pss = patches)
+        
+        # cart_prod
+        # B x (P x P) x E -> B x P x P x 2E
+        ret = torch.cat((y,z),dim=2)
+        ret = ret.reshape(batch,patches,patches,2*embed)
+        return ret
+        
+    def apply_layer_piecewise(self, x, layer, piece_cnt = 2):
+        i = int(sqrt(x.shape[1]))
+        pc = piece_cnt
+        for j in range(i):
+            # B x P x P x 2E -> B x P x P/2 x 2 x 2E
+            x = x.reshape(x.shape[0],x.shape[1],x.shape[2]//pc,2,x.shape[3])
+            # B x P x P/2 x 4E
+            x = x.flatten(3)
+            # B x P x P/2 x 4E -> B x P x P/2 x 2E
+            x = layer(x)
+        
+        x = x.squeeze()
         return x
 
-    def set_to_ones(self):
-        self.lin1.weight.data.fill_(1.0)
-        self.lin1.bias.data.fill_(1.0)
-        self.lin2.weight.data.fill_(1.0)
-        self.lin2.bias.data.fill_(1.0)
-        self.lin3.weight.data.fill_(1.0)
-        self.lin3.bias.data.fill_(1.0)
-        self.combine.weight.data.fill_(1.0)
-        self.combine.bias.data.fill_(1.0)
-        self.head.weight.data.fill_(1.0)
-        self.head.bias.data.fill_(1.0)
+    def forward(self, x):
+        B = x.shape[0]
+        x = self.batch_norm(x)
+        # B x P x E
+        embeds = self.patch_embed(x)
 
-        # set nope to ones
-        for l in self.nope:
-            if isinstance(l, nn.Linear):
-                l.weight.data.fill_(1.0)
-                l.bias.data.fill_(1.0)
-    
-    def grad_false(self):
-        self.patch_embed.patch_embed.requires_grad = False
-        self.lin1.requires_grad = False
-        self.lin2.requires_grad = False
-        self.lin3.requires_grad = False
-        self.combine.requires_grad = False
-        self.head.requires_grad = False
+        # B x P x P x 2E 
+        # also dosnt consider cls tokens
+        embeds_cart = self.cartesian_prod_last_dim(
+            embeds[:,0:self.patches_pr_img-1,:])
+        # B x P x P x E
+        correl = self.correlation(embeds_cart)
+        # B x P x P x E -> B x P x E
+        cross_correl = self.apply_layer_piecewise(correl, self.cross_correlation, self.cross_corr_cnt)
+        # 1 x E
+        cls = embeds[:,embeds.shape[1]-1,:]
+        # B x E
+        cls = cls.expand(B,self.embed_dim)
+        # B x 1 x E
+        cls = cls.unsqueeze(1)
+        # B x P x E
+        # where P is with cls tokens
+        cross_correl = torch.cat((cross_correl,cls),dim=1)
+
+
+
+
+
+        return cross_correl
 
     def print_sizes(self):
         print("Patch Embed: ",self.patch_embed.patch_embed.weight.shape, " Grad: ", self.patch_embed.patch_embed.weight.requires_grad)
@@ -221,35 +206,10 @@ print(f"Using {device} device")
 
 
 model = SimpleModel()
-#model.print_sizes()
-# # s = 0
-# # for n,param in model.named_parameters():
-# #     s+= param.numel()
-# #     #print(n)
 
-# # print("params: ",s)
-# # # dummy img batch: 32x3x124x124
-# # from figures_dataset import FiguresData
-
-# # import torch
-
-# # data_set = FiguresData(128, 2,augment = False)
-# # data_loader = torch.utils.data.DataLoader(data_set, batch_size=2, shuffle=True)
-
-# # model.print_sizes()
 
 dummy_img = torch.rand(32,3,128,128, device=device)
 
 r = model(dummy_img)
-# model.set_to_ones()
-# model.grad_false()
 
 print(r.shape)
-
-# s_t = SimpleTrainer([128,5])
-
-# dummy_ten = torch.rand(1,128,5)
-
-# r = s_t(dummy_ten)
-
-# print(r.shape)
