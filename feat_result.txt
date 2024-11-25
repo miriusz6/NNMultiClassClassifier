@@ -1,0 +1,6 @@
+Cross embed, one layer embed*embed -> embed/10
+Many runs, two datasets
+
+Validation loss 0.2152 | Validation accuracy 0.9406
+Validation loss 0.2821 | Validation accuracy 0.9333
+

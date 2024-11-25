@@ -108,6 +108,7 @@ class CrossCorrelator(nn.Module):
         self.add_module('cross_correlation', self.cross_correlation)
         self.add_module('cross_path', self.cross_path)
 
+    
         
 
     def cartesian_prod_last_dim(self, x):
@@ -176,11 +177,10 @@ class CrossCorrelator(nn.Module):
         
         return cross_path
 
-        
 
 
 
-class SimpleModel(nn.Module):
+class FModel(nn.Module):
     def __init__(self, 
                  device = 'cuda',
                  id_ = 0,
@@ -252,14 +252,30 @@ class SimpleModel(nn.Module):
 
         self.comb_pred = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(self.classes*3, self.classes*2, device=device),
+            nn.Linear(self.classes*4, self.classes*2, device=device),
             nn.ReLU(),
             nn.Linear(self.classes*2,self.classes, device=device),
         )
 
+        self.feat_correl = nn.Sequential(
+            nn.LayerNorm(embed_dim*4, device=device),
+            nn.Linear(embed_dim*4, embed_dim*2, device=device),
+            nn.ReLU(),
+            nn.Linear(embed_dim*2, embed_dim, device=device),
+            nn.LayerNorm(embed_dim, device=device),
+            nn.ReLU(),
+        )
+
+        self.feat_downsize = nn.Sequential(
+            nn.Linear(embed_dim, 4, device=device),
+            nn.ReLU(),
+        )
+            
+
         self.cor1_w = nn.Parameter(torch.tensor(0.5))
         self.cor2_w = nn.Parameter(torch.tensor(0.5))
         self.main_w = nn.Parameter(torch.tensor(0.5))
+        self.f_corr_w = nn.Parameter(torch.tensor(0.5))
 
         self.add_module('batch_norm', self.batch_norm)
         self.add_module('patch_embed', self.patch_embed)
@@ -267,6 +283,30 @@ class SimpleModel(nn.Module):
         self.add_module('correlator1', self.correlator1)
         self.add_module('correlator2', self.correlator2)
         self.add_module('cross_path', self.cross_path)
+
+    def cartesian_prod_last_dim_features(self, x):
+        batch = x.shape[0]
+        patches = x.shape[1]
+        embed = x.shape[2]
+        
+        # B x P x E -> B x P x 1 x E
+        y = x.unsqueeze(2)
+        # B x P x 1 x E -> B x P x P x E
+        y = y.expand(batch,patches,embed, embed)
+        # B x P x P x E -> B x (P x P) x E
+        y  = y.reshape(batch,patches,embed * embed)
+
+        # B x (P x P) x E -> B x (P x P) x E
+        # but the last dim is no longer the same 
+        # (one repeated) embedding
+        z = rearrange(y, 'b ps (e ee) -> b ps (ee e)',
+                            e = embed, ee = embed)
+        #z = z * self.correl_weight
+        # cart_prod
+        # B x (P x P) x E -> B x P x P x 2E
+        ret = torch.cat((y,z),dim=2)
+        ret = ret.reshape(batch,patches,2,embed*embed)
+        return ret
 
     def apply_layer_piecewise(self, x, layer, piece_cnt = 2, dim = 2, early_dim_stop = -1):
         i = log(x.shape[dim], piece_cnt)
@@ -293,6 +333,12 @@ class SimpleModel(nn.Module):
         x = x.squeeze()
         return x
     
+    def feature_correl(self, x):
+        cart = self.cartesian_prod_last_dim(x)
+        v_dim = (x.shape[0],x.shape[1]*x.shape[2]) + x.shape[3:]
+        xA = cart.view(v_dim)[:,:,0,:]
+        xB = cart.view(v_dim)[:,:,1,:]
+        return (xA * xB)
 
     def forward(self, x):
 
@@ -306,16 +352,25 @@ class SimpleModel(nn.Module):
         
         cross_path_corr1 = self.correlator1(embeds)
 
-        cross_path_corr2 = self.correlator2(embeds)
+        y = self.cartesian_prod_last_dim_features(embeds)
+        y = y[:,:,0,:] * y[:,:,1,:]
+        y = self.feat_downsize(y.view(y.shape[0],
+                                      y.shape[1],self.embed_dim,self.embed_dim))
+        y = y.flatten(-2)
+        y = self.feat_correl(y)
 
-        #cross_path_corr = cross_path + (cross_path_corr1 * self.cor1_w) + (cross_path_corr2 * self.cor2_w)
-        #cross_path_corr = nn.functional.relu(cross_path_corr)
-        #pred = self.head(cross_path_corr)
+        cross_path_y = self.apply_layer_piecewise(y, self.cross_path, 2, dim = 1,
+                                                early_dim_stop=4)
+        cross_path_y = cross_path_y.flatten(1)
+
+        cross_path_corr_y = self.correlator1(y)
+
 
         pred1 = self.head(cross_path)
-        pred2 = self.head(cross_path_corr1)
-        pred3 = self.head(cross_path_corr2)
-        p = torch.cat((pred1*self.main_w,pred2*self.cor1_w,pred3*self.cor2_w),dim=1)
+        pred2 = self.head(cross_path_y)
+        pred3 = self.head(cross_path_corr1)
+        pred4 = self.head(cross_path_corr_y)
+        p = torch.cat((pred1*self.main_w,pred2*self.f_corr_w, pred3*self.cor1_w,pred4*self.cor2_w),dim=1)
         pred = self.comb_pred(p) #(pred1*self.main_w) + (pred2 * self.cor1_w) + (pred3 * self.cor2_w)
 
         
@@ -354,7 +409,7 @@ model_config = {
     "embed_dim" : 100,
 }
 
-model = SimpleModel(**model_config)
+model = FModel(**model_config)
 
 
 dummy_img = torch.rand(32,3,128,128, device=device)
